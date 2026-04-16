@@ -1,44 +1,43 @@
+# core/safety/night_mode.py
 """
-🌙 NIGHT MODE 2030 ADVANCED — Graceful shutdown + soft resume
-✅ Улучшения:
-- Graceful shutdown браузера с сохранением cookies, localStorage, sessionStorage
-- Soft resume браузера после ночи (5-10 мин спокойного поведения)
-- Полная поддержка асинхронных операций
-- Правильный JSON сохранить/загрузить
+🌙 NIGHT MODE 2027 — Рандомный ночной режим с graceful shutdown
+Сохранение cookies + localStorage + sessionStorage
 """
 
 import json
 import random
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from pathlib import Path
 import asyncio
 
 from playwright.async_api import Page, BrowserContext
-from colorama import Fore, Style
+from colorama import Fore, Style  # ✅ ДОБАВЛЕНО!
 
 from config.settings import settings
 
 
 class NightMode:
-    """🌙 Управление ночным режимом с graceful shutdown и soft resume"""
+    """🌙 Управление ночным режимом с graceful shutdown"""
 
     def __init__(self, logger, notifier=None):
         self.logger = logger
         self.notifier = notifier
         
-        self.overrides: Dict[str, float] = {}
-        self.suspended_accounts: Dict[str, Dict] = {}
+        self.overrides: Dict[str, float] = {}  # account_id → override_end_timestamp
+        self.suspended_accounts: Dict[str, Dict] = {}  # account_id → suspension_data
         
+        # Хранилище сохранённых сессий
         self.session_storage_path = Path("storage/night_mode_sessions")
         self.session_storage_path.mkdir(parents=True, exist_ok=True)
 
     def get_night_schedule(self) -> tuple:
-        """Получить расписание ночного режима (с рандомизацией)"""
+        """Получить расписание ночного режима (может быть рандомным)"""
         base_start = settings.night_mode_start[0]
         base_end = settings.night_mode_end[0]
         
-        random_offset_start = random.randint(-60, 60)
+        # Рандомизируем на ±30-60 минут
+        random_offset_start = random.randint(-60, 60)  # ✅ УПРОЩЕНО
         random_offset_end = random.randint(-60, 60)
         
         offset_start_hours = random_offset_start // 60
@@ -56,24 +55,26 @@ class NightMode:
         if account_id in self.overrides:
             override_end = self.overrides[account_id]
             if datetime.now().timestamp() < override_end:
-                return True
+                return True  # Override активен
             else:
-                del self.overrides[account_id]
+                del self.overrides[account_id]  # Override истёк
 
         # Проверяем ночной режим
         current_hour = datetime.now().hour
         night_start, night_end = self.get_night_schedule()
 
         if night_start <= night_end:
+            # Нормальный случай
             return not (night_start <= current_hour < night_end)
         else:
+            # Режим переходит через полночь
             return not (current_hour >= night_start or current_hour < night_end)
 
-    async def graceful_shutdown(
+    async def graceful_shutdown_browser(
         self,
-        account_id: str,
         page: Page,
-        context: Optional[BrowserContext] = None,
+        context: BrowserContext,
+        account_id: str,
     ) -> Dict:
         """
         Graceful shutdown браузера с сохранением ВСЕГО
@@ -82,6 +83,7 @@ class NightMode:
         - cookies
         - localStorage
         - sessionStorage
+        - История просмотров
         """
         
         shutdown_data = {
@@ -90,14 +92,14 @@ class NightMode:
             "cookies": [],
             "local_storage": {},
             "session_storage": {},
+            "indexed_db": {},
         }
 
         try:
             # ─── СОХРАНЯЕМ COOKIES ───
-            if context:
-                cookies = await context.cookies()
-                shutdown_data["cookies"] = cookies
-                self.logger.info(account_id, f"💾 Сохранено {len(cookies)} cookies")
+            cookies = await context.cookies()
+            shutdown_data["cookies"] = cookies
+            self.logger.info(account_id, f"💾 Сохранено {len(cookies)} cookies")
 
             # ─── СОХРАНЯЕМ localStorage ───
             try:
@@ -141,7 +143,7 @@ class NightMode:
             self.suspended_accounts[account_id] = shutdown_data
 
             print(f"\n  {Fore.BLUE}💤 Graceful shutdown для {account_id}{Style.RESET_ALL}")
-            print(f"     💾 Сохранено: {len(shutdown_data['cookies'])} cookies, {len(shutdown_data['local_storage'])} localStorage, {len(shutdown_data['session_storage'])} sessionStorage")
+            print(f"     💾 Сохранено: {len(cookies)} cookies, {len(local_storage)} localStorage, {len(session_storage)} sessionStorage")
 
             return shutdown_data
 
@@ -149,19 +151,16 @@ class NightMode:
             self.logger.error(account_id, f"Graceful shutdown error: {e}", severity="HIGH")
             return shutdown_data
 
-    async def soft_resume(
+    async def soft_resume_browser(
         self,
-        account_id: str,
         page: Page,
-        context: Optional[BrowserContext] = None,
+        context: BrowserContext,
+        account_id: str,
     ) -> bool:
         """
-        Soft resume после ночи (восстановление сессии)
+        Soft resume после ночи (5-10 минут спокойного поведения)
         
-        Восстанавливает:
-        - cookies
-        - localStorage
-        - sessionStorage
+        Восстанавливает сессию и постепенно возвращает активность
         """
         
         try:
@@ -176,12 +175,9 @@ class NightMode:
                 shutdown_data = json.load(f)
 
             # ─── ВОССТАНАВЛИВАЕМ COOKIES ───
-            if shutdown_data.get("cookies") and context:
-                try:
-                    await context.add_cookies(shutdown_data["cookies"])
-                    self.logger.info(account_id, f"✅ Восстановлено {len(shutdown_data['cookies'])} cookies")
-                except Exception as e:
-                    self.logger.warning(account_id, f"Cookies restore error: {e}")
+            if shutdown_data.get("cookies"):
+                await context.add_cookies(shutdown_data["cookies"])
+                self.logger.info(account_id, f"✅ Восстановлено {len(shutdown_data['cookies'])} cookies")
 
             # ─── ВОССТАНАВЛИВАЕМ localStorage ───
             if shutdown_data.get("local_storage"):
@@ -217,17 +213,14 @@ class NightMode:
                 except Exception as e:
                     self.logger.warning(account_id, f"sessionStorage restore error: {e}")
 
-            # ─── SOFT RESUME: 5 МИНУТ СПОКОЙНОГО ПОВЕДЕНИЯ ───
-            print(f"\n  {Fore.GREEN}🌅 Soft resume для {account_id} (5 мин спокойного поведения){Style.RESET_ALL}")
+            # ─── SOFT RESUME: 5-10 МИНУТ СПОКОЙНОГО ПОВЕДЕНИЯ ───
+            print(f"\n  {Fore.GREEN}🌅 Soft resume для {account_id} (5-10 мин спокойного поведения){Style.RESET_ALL}")
             
-            soft_resume_duration = 5 * 60
+            soft_resume_duration = 5 * 60  # 5 минут
             await asyncio.sleep(soft_resume_duration)
 
             if self.notifier:
-                try:
-                    await self.notifier.notify_night_mode_wake_up(account_id)
-                except Exception:
-                    pass
+                await self.notifier.notify_night_mode_wake_up(account_id)
 
             return True
 
@@ -247,10 +240,12 @@ class NightMode:
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
+                    # Если loop уже бежит, создаём task
                     asyncio.create_task(
                         self.notifier.notify_night_override(account_id, hours)
                     )
                 else:
+                    # Иначе просто запускаем
                     loop.run_until_complete(
                         self.notifier.notify_night_override(account_id, hours)
                     )

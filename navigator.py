@@ -1,13 +1,9 @@
+# core/avito/navigator.py
 """
-🚀 NAVIGATOR v2.4 ADVANCED
-✅ Улучшения:
-- Добавлен метод perform_search для поиска по различным критериям
-- Поддержка поиска по мототехнике, бюджету, объёму двигателя
-- Интеграция с категориями Avito
+🚀 NAVIGATOR — Навигация по Avito с полной защитой
 """
 
 import asyncio
-import random
 from typing import Optional
 
 from playwright.async_api import Page
@@ -17,8 +13,6 @@ from core.avito.selectors import AvitoUrls
 
 
 class AvitoNavigator:
-    """🚀 Навигатор по Avito с поддержкой поиска"""
-    
     def __init__(self, logger):
         self.logger = logger
 
@@ -30,94 +24,53 @@ class AvitoNavigator:
         attempts: int = 3,
         timeout_ms: int = 30000,
     ) -> Optional[ThreatInfo]:
-        """Перейти на Avito с проверкой загрузки"""
-        
+        """Перейти на страницу с проверкой угроз"""
         for attempt in range(1, attempts + 1):
             try:
-                self.logger.info(account_id, f"🌐 [{attempt}/{attempts}] {url[:60]}")
+                await page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+                await asyncio.sleep(1.0)
                 
-                await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                # Проверяем угрозы
+                threat = await check_threats(page)
                 
-                await asyncio.sleep(2)
-                
-                is_ok = await self._verify_page_loaded(page, account_id, url)
-                
-                if is_ok:
-                    threat = await check_threats(page)
+                if threat and not threat.is_safe:
+                    self.logger.risk(
+                        account_id,
+                        threat.type.value.upper(),
+                        threat.message,
+                        score=50
+                    )
                     
-                    if threat and not threat.is_safe:
-                        self.logger.risk(
-                            account_id,
-                            threat.type.value.upper(),
-                            threat.message,
-                            score=50
-                        )
-                    
-                    self.logger.success(account_id, f"✅ Загружена ({attempt})")
-                    return threat
+                    if threat.type == ThreatType.BAN:
+                        self.logger.error(account_id, "БАН АККАУНТА", severity="CRITICAL")
+                    elif threat.type == ThreatType.BLOCK:
+                        self.logger.error(account_id, "БЛОКИ��ОВКА IP", severity="CRITICAL")
+                    elif threat.type == ThreatType.CAPTCHA:
+                        self.logger.warning(account_id, "Требуется капча")
                 
-                if attempt < attempts:
-                    delay = random.uniform(2, 5)
-                    self.logger.info(account_id, f"⏳ Ожидаю {delay:.1f} сек...")
-                    await asyncio.sleep(delay)
-                else:
-                    self.logger.error(account_id, f"❌ Не удалось загрузить после {attempts} попыток", severity="HIGH")
-                    return None
-            
-            except asyncio.TimeoutError:
-                self.logger.warning(account_id, f"⏱️ TIMEOUT (попытка {attempt}/{attempts})")
+                return threat
                 
-                if attempt < attempts:
-                    await asyncio.sleep(random.uniform(3, 6))
-                else:
-                    return None
-            
             except Exception as e:
-                self.logger.error(account_id, f"goto error: {str(e)[:100]}", severity="MEDIUM")
-                
                 if attempt < attempts:
-                    await asyncio.sleep(random.uniform(2, 5))
+                    await asyncio.sleep(2.0)
+                    continue
                 else:
+                    self.logger.error(account_id, f"goto error: {e}")
                     return None
         
         return None
 
-    async def _verify_page_loaded(self, page: Page, account_id: str, url: str) -> bool:
-        """Проверить что страница загружена"""
-        
-        try:
-            current_url = page.url
-            page_content = await page.content()
-            
-            if "avito" not in current_url.lower():
-                self.logger.warning(account_id, f"⚠️ Не Avito: {current_url}")
-                return False
-            
-            if len(page_content) < 1000:
-                self.logger.warning(account_id, f"⚠️ Мало контента ({len(page_content)} символов)")
-                return False
-            
-            if "html" not in page_content.lower():
-                self.logger.warning(account_id, "⚠️ Нет HTML")
-                return False
-            
-            self.logger.success(account_id, f"✅ Контент: {len(page_content)} символов")
-            return True
-        
-        except Exception as e:
-            self.logger.warning(account_id, f"⚠️ Ошибка проверки: {str(e)[:80]}")
-            return False
-
     async def is_logged_in(self, page: Page) -> bool:
         """Проверить авторизацию"""
         try:
+            # Если URL содержит login - не авторизирован
             if "login" in page.url.lower():
                 return False
             
+            # Проверяем наличие кнопок профиля
             profile_selectors = [
                 '[data-marker="header/profile"]',
                 'a[href*="/profile"]',
-                '[data-marker="user-profile-button"]',
             ]
             
             for selector in profile_selectors:
@@ -133,7 +86,7 @@ class AvitoNavigator:
             return False
 
     async def click_listing(self, page: Page, index: int = 0) -> bool:
-        """Кликнуть на объявление"""
+        """Кликнуть на объявление по индексу"""
         try:
             listings = await page.locator('[data-marker="item"]').all()
             
@@ -148,74 +101,8 @@ class AvitoNavigator:
         except Exception:
             return False
 
-    async def perform_search(
-        self,
-        page: Page,
-        query: str,
-        category: str = "all",
-        account_id: str = "system",
-    ) -> bool:
-        """
-        Выполнить поиск на Avito
-        
-        Args:
-            page: Playwright Page
-            query: Поисковый запрос
-            category: Категория (all, mototehnika, auto и т.д.)
-            account_id: ID аккаунта для логирования
-            
-        Returns:
-            True если поиск успешен
-        """
-        try:
-            # ─── ПЕРЕХОДИМ НА ПРАВИЛЬНУЮ КАТЕГОРИЮ (если нужно) ───
-            if category == "mototehnika":
-                category_url = "https://www.avito.ru/moskva/mototsikly_i_mototehnika"
-                await self.goto(page, category_url, account_id)
-                await asyncio.sleep(random.uniform(1, 2))
-            
-            # ─── ИЩЕМ ПОЛЕ ПОИСКА ───
-            search_input = page.locator('input[data-marker="search-form/suggest"], input[placeholder*="Поиск"]').first
-            
-            if not await search_input.is_visible(timeout=2000):
-                self.logger.warning(account_id, f"Поле поиска не найдено")
-                return False
-            
-            # ─── КЛИКАЕМ НА ПОЛЕ ПОИСКА ───
-            await search_input.click()
-            await asyncio.sleep(random.uniform(0.5, 1.0))
-            
-            # ─── ПЕЧАТАЕМ ЗАПРОС ───
-            await search_input.type(query, delay=random.uniform(30, 80))
-            await asyncio.sleep(random.uniform(0.8, 1.5))
-            
-            # ─── НАЖИМАЕМ ENTER ИЛИ КЛИКАЕМ КНОПКУ ПОИСКА ───
-            submit_button = page.locator('button[data-marker="search-form/submit"], button[type="submit"]').first
-            
-            if await submit_button.is_visible(timeout=1000):
-                await submit_button.click()
-            else:
-                await search_input.press("Enter")
-            
-            # ─── ЖДЁМ ЗАГРУЗКИ РЕЗУЛЬТАТОВ ───
-            await asyncio.sleep(random.uniform(2, 4))
-            
-            # ─── ПРОВЕРЯЕМ ЧТО РЕЗУЛЬТАТЫ ЗАГРУЖЕНЫ ───
-            listings_count = await page.locator('[data-marker="item"]').count()
-            
-            if listings_count > 0:
-                self.logger.success(account_id, f"✅ Поиск '{query}' — найдено {listings_count} объявлений")
-                return True
-            else:
-                self.logger.warning(account_id, f"⚠️ Поиск '{query}' — результатов не найдено")
-                return False
-            
-        except Exception as e:
-            self.logger.error(account_id, f"Search error: {str(e)[:100]}", severity="MEDIUM")
-            return False
-
     async def search(self, page: Page, query: str) -> bool:
-        """Поиск (legacy метод)"""
+        """Поиск"""
         try:
             search_input = page.locator('input[data-marker="search-form/suggest"]').first
             

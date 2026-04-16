@@ -4,6 +4,11 @@
 ПОЛНОСТЬЮ АСИНХРОННЫЙ, PRODUCTION-READY
 Управление 3+ аккаунтами одновременно, real-time мониторинг, Telegram уведомления
 БЕЗ СОКРАЩЕНИЙ, максимально детальный
+
+✅ ИСПРАВЛЕНИЕ: Добавлена ко��ректная обработка входа в run_command_loop()
+- Если _read_input() возвращает None, цикл ждёт снова, не выходит
+- Если возвращает пустую строку, цикл продолжает ждать ввода
+- Только "exit" или KeyboardInterrupt завершают программу
 """
 
 from __future__ import annotations
@@ -52,7 +57,7 @@ class AvitoBot:
     - Защита от блокировок (Night Mode, Circuit Breaker, Risk Analyzer)
     """
     
-    # ════════════════════════════════════════════════════════════════
+    # ════════════════════���═══════════════════════════════════════════
     # ИНИЦИАЛИЗАЦИЯ
     # ════════════════════════════════════════════════════════════════
     
@@ -78,7 +83,7 @@ class AvitoBot:
         
         # ─────────────────────────────────────────────────────────────
         # БЕЗОПАСНОСТЬ
-        # ─────────────────────────────────────────────────────────────
+        # ────���────────────────────────────────────────────────────────
         
         self.circuit_breaker = CircuitBreaker(self.logger, self.notifier)
         self.risk_analyzer = RiskAnalyzer(self.logger)
@@ -623,7 +628,7 @@ class AvitoBot:
     # ════════════════════════════════════════════════════════════════
     
     async def cmd_close(self, acc_id: str):
-        """Закр��ть браузер (сессия сохранена)"""
+        """Закрыть браузер (сессия сохранена)"""
         
         await self.cmd_stop_alive(acc_id)
         await self.browser_launcher.close(acc_id)
@@ -664,7 +669,7 @@ class AvitoBot:
             print(f"  {Fore.LIGHTYELLOW_EX}📱 Информация:{Style.RESET_ALL}")
             print(f"     Телефон: {status['phone']}")
             print(f"     Авторизирован: {'✅ Да' if status['is_authenticated'] else '❌ Нет'}")
-            print(f"     Прогрет: {'✅ Да' if status['is_warmed_up'] else '❌ Нет'}")
+            print(f"     Прогрет: {'✅ ��а' if status['is_warmed_up'] else '❌ Нет'}")
             print(f"     Статус: {status['status'].upper()}")
             
             if session_status:
@@ -683,7 +688,7 @@ class AvitoBot:
         
         else:
             print(f"\n{Fore.CYAN}{'─' * 90}{Style.RESET_ALL}")
-            print(f"{Fore.LIGHTYELLOW_EX}📊 СТАТУС ВСЕХ АКК��УНТОВ{Style.RESET_ALL}")
+            print(f"{Fore.LIGHTYELLOW_EX}📊 СТАТУС ВСЕХ АККАУНТОВ{Style.RESET_ALL}")
             print(f"{Fore.LIGHTYELLOW_EX}🔄 ФОНОВЫХ ЗАДАЧ: {len(self.running_tasks)}{Style.RESET_ALL}")
             print(f"{Fore.CYAN}{'─' * 90}{Style.RESET_ALL}\n")
             
@@ -823,40 +828,60 @@ class AvitoBot:
 """)
     
     # ════════════════════════════════════════════════════════════════
-    # КОМАНДНЫЙ ЦИКЛ (АСИНХРОННЫЙ)
+    # КОМАНДНЫЙ ЦИКЛ (АСИНХРОННЫЙ) — ✅ ИСПРАВЛЕНО
     # ════════════════════════════════════════════════════════════════
     
     async def _read_input(self) -> Optional[str]:
-        """Неблокирующее чтение ввода пользователя"""
+        """Неблокирующее чтение ввода пользователя с корректной обработкой"""
         
         loop = asyncio.get_event_loop()
         
         try:
-            cmd = await loop.run_in_executor(
-                None,
-                lambda: input(f"\n{Fore.CYAN}>>> {Style.RESET_ALL}").strip()
+            # Ждём ввода от пользователя в фоновом потоке
+            cmd = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: input(f"\n{Fore.CYAN}>>> {Style.RESET_ALL}").strip()
+                ),
+                timeout=None  # Ждём бесконечно (пока пользователь не введёт команду)
             )
-            return cmd
+            return cmd if cmd else None
+        
         except EOFError:
+            # Ctrl+D или конец потока ввода
             return "exit"
+        
         except asyncio.CancelledError:
+            # Задача отменена
             return "exit"
-        except Exception:
+        
+        except asyncio.TimeoutError:
+            # Таймаут (не произойдёт, так как timeout=None)
+            return None
+        
+        except KeyboardInterrupt:
+            # Ctrl+C
+            raise
+        
+        except Exception as e:
+            # Любая другая ошибка
+            self.logger.warning("bot", f"Input read error: {e}")
             return None
     
     async def run_command_loop(self):
         """
         Главный командный цикл (ПОЛНОСТЬЮ АСИНХРОННЫЙ)
         
-        Позволяет:
-        - Вводить команды в любой момент
-        - Запускать несколько фоновых задач однов��еменно
-        - Видеть статус задач и аккаунтов в реальном времени
-        - Полностью контролировать все аккаунты
+        ✅ ИСПРАВЛЕНИЕ:
+        - Цикл никогда не выходит сам по себе
+        - Ждёт ввода от пользователя
+        - Обрабатывает команды
+        - Продолжает работать, пока пользователь не введёт 'exit'
         """
         
         self.print_help()
         
+        # Основной цикл команд
         while not self.shutdown_event.is_set():
             try:
                 # ─────────────────────────────────────────────────
@@ -865,6 +890,7 @@ class AvitoBot:
                 
                 cmd = await self._read_input()
                 
+                # Если ввод пуст, продолжаем цикл
                 if not cmd:
                     continue
                 
@@ -959,6 +985,7 @@ class AvitoBot:
             
             except Exception as e:
                 print(f"  {Fore.RED}❌ Ошибка: {e}{Style.RESET_ALL}")
+                self.logger.error("bot", f"Command loop error: {e}", severity="MEDIUM")
     
     # ════════════════════════════════════════════════════════════════
     # ЗАВЕРШЕНИЕ РАБОТЫ

@@ -1,7 +1,13 @@
 # core/warmup/engine.py
 """
-🔥 WARMUP ENGINE — ПОЛНЫЙ И РАБОЧИЙ ПРОГРЕВ АККАУНТА
-5 фаз с полной защитой от ошибок, обработкой timeout, anti-detection
+🔥 WARMUP ENGINE 2030 ADVANCED — ПОЛНЫЙ ПРОГРЕВ ТОЛЬКО МОТОТЕХНИКИ
+✅ ИСПРАВЛЕНИЯ:
+- Все 5 фаз работают ТОЛЬКО с мототехникой (питбайки, квадроциклы, мотоциклы)
+- Deep views обязательны в каждой фазе (открытие карточек + просмотр фото/описания)
+- Natural favorite добавляетс�� в 30-50% случаев
+- Паузы динамические и естественные
+- Удалён triple_click (заменён fill)
+- Улучшена загрузка Avito (networkidle вместо domcontentloaded)
 """
 
 import asyncio
@@ -21,10 +27,14 @@ from core.browser.fingerprint import Fingerprint
 
 
 class WarmupEngine:
-    """Полный прогрев аккаунта"""
+    """Полный прогрев аккаунта ТОЛЬКО МОТОТЕХНИКА"""
 
-    def __init__(self, logger):
+    def __init__(self, logger, executor=None, notifier=None):
         self.logger = logger
+        self.executor = executor
+        self.notifier = notifier
+        self.total_warmup_duration = 0.0
+        self.deep_views_count = 0
 
     async def run_full_warmup(
         self,
@@ -33,21 +43,26 @@ class WarmupEngine:
         navigator: AvitoNavigator,
         night_mode: NightMode,
         fp: Optional[Fingerprint] = None,
+        browser_launcher = None,
     ) -> bool:
-        """Запустить полный прогрев из 5 фаз"""
-        print(f"\n{Fore.CYAN}{'=' * 70}{Style.RESET_ALL}")
-        print(f"{Fore.LIGHTYELLOW_EX}{'🔥 НАЧИНАЕТСЯ ПРОГРЕВ АККАУНТА (5 ФАЗ)':^70}{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}{'=' * 70}{Style.RESET_ALL}\n")
+        """Запустить полный прогрев из 5 фаз МОТОТЕХНИКИ"""
+        
+        warmup_start = datetime.now()
+        
+        print(f"\n{Fore.CYAN}{'=' * 90}{Style.RESET_ALL}")
+        print(f"{Fore.LIGHTYELLOW_EX}{'🔥 ПОЛНЫЙ ПРОГРЕВ АККАУНТА: 5 ФАЗ МОТОТЕХНИКИ (75-105 МИНУТ)':^90}{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{'=' * 90}{Style.RESET_ALL}\n")
 
         phases = [
-            ("Фаза 1: Внешние сайты", self._phase_external_sites),
-            ("Фаза 2: Avito категории", self._phase_avito_categories),
-            ("Фаза 3: Профиль", self._phase_profile),
-            ("Фаза 4: Интенсивный просмотр", self._phase_intensive),
-            ("Фаза 5: Режим покупателя", self._phase_buyer_mode),
+            ("Фаза 1: Введение в мототехнику (категория + листание)", self._phase_1_intro_moto),
+            ("Фаза 2: Питбайки 40-60к (поиск + deep views)", self._phase_2_pitbikes),
+            ("Фаза 3: Квадроциклы и мотоциклы (категория + карточки)", self._phase_3_quads_motos),
+            ("Фаза 4: Эндуро и кросс (поиск + детальный просмотр)", self._phase_4_enduro_cross),
+            ("Фаза 5: Запчасти и аксессуары мото (категория + добавление в избранное)", self._phase_5_parts),
         ]
 
         completed_phases = 0
+        self.deep_views_count = 0
 
         for phase_num, (phase_name, phase_func) in enumerate(phases, 1):
             # Проверяем ночной режим перед каждой фазой
@@ -56,309 +71,443 @@ class WarmupEngine:
                 self.logger.warning(account_id, f"Warmup paused by night mode at phase {phase_num}")
                 break
 
-            print(f"\n  {Fore.YELLOW}🔥 {phase_name}...{Style.RESET_ALL}")
+            print(f"\n{Fore.CYAN}{'─' * 90}{Style.RESET_ALL}")
+            print(f"{Fore.LIGHTYELLOW_EX}[ФАЗА {phase_num}/5] {phase_name}{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}{'─' * 90}{Style.RESET_ALL}\n")
 
             try:
-                # Запускаем фазу с timeout 15 минут
+                # Запускаем фазу с timeout 20 минут
                 success = await asyncio.wait_for(
-                    phase_func(page, account_id, navigator, fp),
-                    timeout=900.0
+                    phase_func(page, account_id, navigator, fp, browser_launcher),
+                    timeout=1200.0
                 )
 
                 if success:
-                    print(f"  {Fore.GREEN}✅ {phase_name} завершена{Style.RESET_ALL}")
-                    self.logger.success(account_id, phase_name)
+                    print(f"\n  {Fore.GREEN}✅ Фаза {phase_num} завершена{Style.RESET_ALL}")
+                    self.logger.success(account_id, f"Phase {phase_num} completed")
                     completed_phases += 1
                 else:
-                    print(f"  {Fore.YELLOW}⚠️ {phase_name} имела проблемы{Style.RESET_ALL}")
-                    self.logger.warning(account_id, f"{phase_name} had issues")
+                    print(f"\n  {Fore.YELLOW}⚠️ Фаза {phase_num} имела проблемы{Style.RESET_ALL}")
+                    self.logger.warning(account_id, f"Phase {phase_num} had issues")
                     completed_phases += 1
 
-                # Пауза между фазами (зависит от усталости)
-                pause = random.uniform(8.0, 20.0)
-                print(f"  {Fore.CYAN}⏱️ Пауза {pause:.1f}с перед следующей фазой...{Style.RESET_ALL}")
+                # Пауза между фазами (8-25 сек)
+                pause = random.uniform(8.0, 25.0)
+                print(f"  {Fore.CYAN}⏱️ Пауза {pause:.1f}сек перед фазой {phase_num + 1}...{Style.RESET_ALL}")
                 await asyncio.sleep(pause)
 
             except asyncio.TimeoutError:
-                print(f"  {Fore.RED}❌ Timeout в {phase_name} (>15 мин){Style.RESET_ALL}")
-                self.logger.error(account_id, f"{phase_name} timeout", severity="HIGH")
-                # Продолжаем на следующую фазу
+                print(f"  {Fore.RED}❌ Timeout в Фазе {phase_num} (>20 мин){Style.RESET_ALL}")
+                self.logger.error(account_id, f"Phase {phase_num} timeout", severity="HIGH")
                 continue
 
             except Exception as e:
-                print(f"  {Fore.RED}❌ Ошибка в {phase_name}: {str(e)[:100]}{Style.RESET_ALL}")
-                self.logger.error(account_id, f"Error in {phase_name}: {e}", severity="HIGH")
-                # Продолжаем на следующую фазу
+                print(f"  {Fore.RED}❌ Ошибка в Фазе {phase_num}: {str(e)[:100]}{Style.RESET_ALL}")
+                self.logger.error(account_id, f"Error in phase {phase_num}: {e}", severity="HIGH")
                 continue
 
-        print(f"\n  {Fore.GREEN}{'=' * 70}{Style.RESET_ALL}")
-        print(f"  {Fore.GREEN}{'✅ ПРОГРЕВ ЗАВЕРШЁН! Завершено фаз: ' + str(completed_phases) + '/5':^70}{Style.RESET_ALL}")
-        print(f"  {Fore.GREEN}{'=' * 70}{Style.RESET_ALL}\n")
+        self.total_warmup_duration = (datetime.now() - warmup_start).total_seconds()
 
-        self.logger.action(account_id, "WARMUP_COMPLETE", "SUCCESS", phases_completed=completed_phases)
+        print(f"\n{Fore.CYAN}{'=' * 90}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}{'✅ ПРОГРЕВ ЗАВЕРШЁН!':^90}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}{f'Завершено фаз: {completed_phases}/5 | Deep views: {self.deep_views_count} | Время: {self.total_warmup_duration/60:.1f} мин':^90}{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{'=' * 90}{Style.RESET_ALL}\n")
+
+        self.logger.action(account_id, "WARMUP_COMPLETE", "SUCCESS", 
+                          phases_completed=completed_phases, 
+                          deep_views=self.deep_views_count,
+                          duration_minutes=self.total_warmup_duration/60)
         
-        # Прогрев считается успешным если прошли минимум 3 фазы
-        return completed_phases >= 3
+        # Прогрев считается успешным если прошли минимум 4 фазы
+        return completed_phases >= 4
 
-    async def _phase_external_sites(
+    async def _phase_1_intro_moto(
         self,
         page: Page,
         account_id: str,
         navigator: AvitoNavigator,
         fp: Optional[Fingerprint] = None,
+        browser_launcher = None,
     ) -> bool:
-        """Фаза 1: Посещение внешних сайтов"""
-        human = HumanBehavior(fp)
-        sites = [
-            "https://www.google.ru",
-            "https://www.yandex.ru",
-            "https://ru.wikipedia.org",
-        ]
-
-        for site in sites:
-            try:
-                print(f"    → {site[:40]}...", end=" ", flush=True)
-                
-                # Используем timeout для goto
-                try:
-                    await asyncio.wait_for(
-                        page.goto(site, wait_until="networkidle", timeout=15000),
-                        timeout=20.0
-                    )
-                    print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
-                except asyncio.TimeoutError:
-                    print(f"{Fore.YELLOW}⏱️{Style.RESET_ALL}")
-                
-                # Просмотр страницы
-                await human.browse_page(page, duration_seconds=random.uniform(15, 35))
-                
-                # Пауза перед следующим сайтом
-                await asyncio.sleep(random.uniform(2.0, 5.0))
-
-            except Exception as e:
-                print(f"{Fore.RED}✗{Style.RESET_ALL}")
-                self.logger.warning(account_id, f"External site error: {site}")
-                continue
-
-        return True
-
-    async def _phase_avito_categories(
-        self,
-        page: Page,
-        account_id: str,
-        navigator: AvitoNavigator,
-        fp: Optional[Fingerprint] = None,
-    ) -> bool:
-        """Фаза 2: Просмотр категорий Avito"""
-        human = HumanBehavior(fp)
-
-        categories = [
-            ("Автомобили", "https://www.avito.ru/moskva/avtomobili"),
-            ("Мотоциклы", "https://www.avito.ru/moskva/mototsikly_i_mototehnika"),
-            ("Запчасти", "https://www.avito.ru/moskva/zapchasti_i_aksessuary"),
-            ("Коллекции", "https://www.avito.ru/moskva/kollektsii"),
-        ]
-
-        for cat_name, category_url in categories:
-            try:
-                print(f"    → {cat_name:20}", end=" ", flush=True)
-                
-                try:
-                    await asyncio.wait_for(
-                        page.goto(category_url, wait_until="networkidle", timeout=15000),
-                        timeout=20.0
-                    )
-                    print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
-                except asyncio.TimeoutError:
-                    print(f"{Fore.YELLOW}⏱️{Style.RESET_ALL}")
-                
-                # Просмотр категории
-                await human.browse_page(page, duration_seconds=random.uniform(20, 40))
-                
-                # Скролл объявлений
-                await human.scroll_page(page, max_scrolls=random.randint(2, 5))
-                
-                # Пауза
-                await asyncio.sleep(random.uniform(3.0, 8.0))
-
-            except Exception as e:
-                print(f"{Fore.RED}✗{Style.RESET_ALL}")
-                self.logger.warning(account_id, f"Category error: {cat_name}")
-                continue
-
-        return True
-
-    async def _phase_profile(
-        self,
-        page: Page,
-        account_id: str,
-        navigator: AvitoNavigator,
-        fp: Optional[Fingerprint] = None,
-    ) -> bool:
-        """Фаза 3: Просмотр профиля и личных данных"""
-        human = HumanBehavior(fp)
-
+        """
+        ФАЗА 1: Введение в мототехнику
+        - Переход в категорию "Мототехника"
+        - Листание объявлений (3-5 скроллов)
+        - Deep view 2-3 карточек
+        """
+        human = HumanBehavior(fp, self.logger)
+        
         try:
-            print(f"    → Профиль", end=" ", flush=True)
+            print("    🔍 Переход в категорию 'Мототехника'...", end=" ", flush=True)
             
+            # Переходим в катег��рию мототехники
+            url = "https://www.avito.ru/moskva/mototsikly_i_mototehnika"
             try:
                 await asyncio.wait_for(
-                    page.goto(AvitoUrls.PROFILE, wait_until="networkidle", timeout=15000),
-                    timeout=20.0
+                    page.goto(url, wait_until="networkidle", timeout=25000),
+                    timeout=30.0
                 )
                 print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
             except asyncio.TimeoutError:
-                print(f"{Fore.YELLOW}⏱️{Style.RESET_ALL}")
-            
-            # Просмотр профиля
-            await human.browse_page(page, duration_seconds=random.uniform(25, 45))
-            
-            # Проверяем информацию о продавце если есть
-            try:
+                print(f"{Fore.YELLOW}⏱️ (перезагрузка){Style.RESET_ALL}")
                 await asyncio.wait_for(
-                    human.check_seller_info(page),
-                    timeout=10.0
+                    page.goto(url, wait_until="domcontentloaded", timeout=20000),
+                    timeout=25.0
                 )
-            except Exception:
-                pass
             
-            await asyncio.sleep(random.uniform(2.0, 5.0))
+            # Просмотр страницы 20-30 сек
+            await human.browse_page(page, duration_seconds=random.uniform(20, 30))
+            await asyncio.sleep(random.uniform(1.5, 3.0))
+            
+            # Скролл объявлений 3-5 раз
+            scrolls = random.randint(3, 5)
+            print(f"    📜 Листание {scrolls} раз...")
+            for i in range(scrolls):
+                await human.scroll_page(page, max_scrolls=1)
+                await asyncio.sleep(random.uniform(2.0, 5.0))
+            
+            # Deep view 2-3 карточек
+            deep_views_target = random.randint(2, 3)
+            print(f"    🔎 Deep view {deep_views_target} карточек...")
+            for idx in range(deep_views_target):
+                success = await human.deep_view_card(page, selector_index=idx, duration_seconds=random.uniform(45, 75))
+                if success:
+                    self.deep_views_count += 1
+                await asyncio.sleep(random.uniform(1.5, 3.0))
             
             return True
+            
         except Exception as e:
-            self.logger.warning(account_id, f"Profile phase error: {e}")
+            self.logger.warning(account_id, f"Phase 1 error: {e}")
             return False
 
-    async def _phase_intensive(
+    async def _phase_2_pitbikes(
         self,
         page: Page,
         account_id: str,
         navigator: AvitoNavigator,
         fp: Optional[Fingerprint] = None,
+        browser_launcher = None,
     ) -> bool:
-        """Фаза 4: Интенсивный просмотр объявлений"""
-        human = HumanBehavior(fp)
-        max_iterations = random.randint(5, 10)
-        success_count = 0
-
-        for i in range(max_iterations):
+        """
+        ФАЗА 2: Питбайки 40-60 тысяч рублей
+        - Поиск "питбайк" или "питбайки 40000" / "питбайки 50000" / "питбайки 60000"
+        - Просмотр 20-35 сек
+        - Deep view 3-4 карточек
+        - Иногда добавление в избранное (20%)
+        """
+        human = HumanBehavior(fp, self.logger)
+        
+        try:
+            # Переходим в категорию мототехники
+            url = "https://www.avito.ru/moskva/mototsikly_i_mototehnika"
+            print("    🔍 Переход в мототехнику для поиска питбайков...", end=" ", flush=True)
             try:
-                print(f"    → Итерация {i+1}/{max_iterations}", end=" ", flush=True)
-                
-                # Если мы не на главной - идём туда
-                if "avito.ru" not in page.url:
-                    try:
-                        await asyncio.wait_for(
-                            page.goto(AvitoUrls.BASE, wait_until="networkidle", timeout=15000),
-                            timeout=20.0
-                        )
-                    except Exception:
-                        pass
-                
-                # Просмотр
-                await human.browse_page(page, duration_seconds=random.uniform(12, 25))
-                
-                # Скролл
-                await human.scroll_page(page, max_scrolls=random.randint(1, 3))
-                
-                # Случайное действие
-                await human.random_human_action(page)
-                
+                await asyncio.wait_for(
+                    page.goto(url, wait_until="networkidle", timeout=25000),
+                    timeout=30.0
+                )
                 print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
-                success_count += 1
-                
-                await asyncio.sleep(random.uniform(1.0, 3.0))
-
             except asyncio.TimeoutError:
                 print(f"{Fore.YELLOW}⏱️{Style.RESET_ALL}")
-                continue
-            except Exception as e:
-                print(f"{Fore.RED}✗{Style.RESET_ALL}")
-                continue
+            
+            await asyncio.sleep(random.uniform(1.0, 2.5))
+            
+            # Выбираем поисковый запрос
+            search_queries = [
+                "питбайк",
+                "питбайки 40000",
+                "питбайки 50000", 
+                "питбайки 60000",
+            ]
+            query = random.choice(search_queries)
+            
+            print(f"    🔎 Поиск: '{query}'...", end=" ", flush=True)
+            
+            # Ищем поле поиска
+            search_input = page.locator('input[data-marker="search-form/suggest"]').first
+            if await search_input.is_visible(timeout=3000):
+                await search_input.click()
+                await asyncio.sleep(random.uniform(0.3, 0.8))
+                
+                # Очищаем поле
+                try:
+                    await search_input.fill("")
+                except Exception:
+                    pass
+                
+                # Печатаем запрос
+                await human.type(page, 'input[data-marker="search-form/suggest"]', query, typos=True)
+                await asyncio.sleep(random.uniform(0.5, 1.5))
+                
+                # Кликаем кнопку поиска
+                submit_btn = page.locator('button[data-marker="search-form/submit"]').first
+                if await submit_btn.is_visible(timeout=2000):
+                    await submit_btn.click()
+                    print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
+                    
+                    # Ждём загрузки результатов
+                    try:
+                        await asyncio.wait_for(
+                            page.wait_for_load_state("networkidle", timeout=25000),
+                            timeout=30.0
+                        )
+                    except Exception:
+                        await asyncio.sleep(3.0)
+                else:
+                    return False
+            else:
+                return False
+            
+            # Просмотр результатов 20-35 сек
+            await human.browse_page(page, duration_seconds=random.uniform(20, 35))
+            await asyncio.sleep(random.uniform(1.5, 3.0))
+            
+            # Deep view 3-4 карточек
+            deep_views_target = random.randint(3, 4)
+            print(f"    🔎 Deep view {deep_views_target} питбайков...")
+            for idx in range(deep_views_target):
+                success = await human.deep_view_card(page, selector_index=idx, duration_seconds=random.uniform(50, 90))
+                if success:
+                    self.deep_views_count += 1
+                    
+                    # Иногда добавляем в избранное (20%)
+                    if random.random() < 0.2:
+                        try:
+                            fav_btn = page.locator('[data-marker="favorite-button"]').first
+                            if await fav_btn.is_visible(timeout=2000):
+                                await asyncio.sleep(random.uniform(0.8, 2.0))
+                                await fav_btn.click()
+                                print(f"      ⭐ Добавлено в избранное")
+                                await asyncio.sleep(random.uniform(0.5, 1.5))
+                        except Exception:
+                            pass
+                
+                await asyncio.sleep(random.uniform(1.5, 3.0))
+            
+            return True
+            
+        except Exception as e:
+            self.logger.warning(account_id, f"Phase 2 error: {e}")
+            return False
 
-        return success_count > 0
-
-    async def _phase_buyer_mode(
+    async def _phase_3_quads_motos(
         self,
         page: Page,
         account_id: str,
         navigator: AvitoNavigator,
         fp: Optional[Fingerprint] = None,
+        browser_launcher = None,
     ) -> bool:
-        """Фаза 5: Режим активного покупателя"""
-        human = HumanBehavior(fp)
-        max_iterations = random.randint(3, 7)
-        success_count = 0
-
-        for i in range(max_iterations):
+        """
+        ФАЗА 3: Квадроциклы и мотоциклы
+        - Переход в категорию "Мототехника"
+        - Листание 3-4 раза
+        - Deep view 3-4 карточек
+        """
+        human = HumanBehavior(fp, self.logger)
+        
+        try:
+            print("    🔍 Категория 'Мототехника' (основной вид)...", end=" ", flush=True)
+            
+            url = "https://www.avito.ru/moskva/mototsikly_i_mototehnika"
             try:
-                print(f"    → Действие {i+1}/{max_iterations}", end=" ", flush=True)
-                
-                # Главная страница
-                if "avito.ru" not in page.url or random.random() < 0.3:
-                    try:
-                        await asyncio.wait_for(
-                            page.goto(AvitoUrls.BASE, wait_until="networkidle", timeout=15000),
-                            timeout=20.0
-                        )
-                    except Exception:
-                        pass
-                
-                # Просмотр изображений
-                try:
-                    await asyncio.wait_for(
-                        human.inspect_images(page, max_images=random.randint(1, 4)),
-                        timeout=15.0
-                    )
-                except Exception:
-                    pass
-                
-                # Скролл
-                await human.scroll_page(page, max_scrolls=random.randint(1, 3))
-                
-                # Попытка кликнуть на объявление
-                try:
-                    listings_count = await page.locator('[data-marker="item"]').count()
-                    if listings_count > 0:
-                        idx = random.randint(0, min(listings_count - 1, 10))
-                        await page.locator('[data-marker="item"]').nth(idx).click()
-                        await asyncio.sleep(random.uniform(2.0, 5.0))
-                        
-                        # Иногда кликаем избранное
-                        if random.random() < 0.3:
-                            try:
-                                fav_btn = page.locator('[data-marker="favorite-button"]').first
-                                if await fav_btn.is_visible(timeout=1000):
-                                    await fav_btn.click()
-                            except Exception:
-                                pass
-                        
-                        # Возвращаемся назад
-                        await page.go_back()
-                        await asyncio.sleep(random.uniform(1.0, 2.0))
-                except Exception:
-                    pass
-                
+                await asyncio.wait_for(
+                    page.goto(url, wait_until="networkidle", timeout=25000),
+                    timeout=30.0
+                )
                 print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
-                success_count += 1
-                
-                await asyncio.sleep(random.uniform(1.0, 3.0))
-
             except asyncio.TimeoutError:
                 print(f"{Fore.YELLOW}⏱️{Style.RESET_ALL}")
-                continue
-            except Exception as e:
-                print(f"{Fore.RED}✗{Style.RESET_ALL}")
-                continue
+            
+            # Просмотр 25-40 сек
+            await human.browse_page(page, duration_seconds=random.uniform(25, 40))
+            await asyncio.sleep(random.uniform(1.5, 3.0))
+            
+            # Листание 3-4 раза
+            scrolls = random.randint(3, 4)
+            print(f"    📜 Листание {scrolls} раз...")
+            for i in range(scrolls):
+                await human.scroll_page(page, max_scrolls=1)
+                await asyncio.sleep(random.uniform(2.0, 5.0))
+            
+            # Deep view 3-4 карточек
+            deep_views_target = random.randint(3, 4)
+            print(f"    🔎 Deep view {deep_views_target} карточек...")
+            for idx in range(deep_views_target):
+                success = await human.deep_view_card(page, selector_index=idx, duration_seconds=random.uniform(50, 85))
+                if success:
+                    self.deep_views_count += 1
+                await asyncio.sleep(random.uniform(1.5, 3.0))
+            
+            return True
+            
+        except Exception as e:
+            self.logger.warning(account_id, f"Phase 3 error: {e}")
+            return False
 
-        return success_count > 0
+    async def _phase_4_enduro_cross(
+        self,
+        page: Page,
+        account_id: str,
+        navigator: AvitoNavigator,
+        fp: Optional[Fingerprint] = None,
+        browser_launcher = None,
+    ) -> bool:
+        """
+        ФАЗА 4: Эндуро и кросс
+        - Поиск "эндуро" или "кросс"
+        - Просмотр результатов
+        - Deep view 2-3 карточек
+        """
+        human = HumanBehavior(fp, self.logger)
+        
+        try:
+            url = "https://www.avito.ru/moskva/mototsikly_i_mototehnika"
+            print("    🔍 Поиск эндуро/кросс...", end=" ", flush=True)
+            
+            try:
+                await asyncio.wait_for(
+                    page.goto(url, wait_until="networkidle", timeout=25000),
+                    timeout=30.0
+                )
+                print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
+            except asyncio.TimeoutError:
+                print(f"{Fore.YELLOW}⏱️{Style.RESET_ALL}")
+            
+            await asyncio.sleep(random.uniform(1.0, 2.5))
+            
+            # Выбираем поисковый запрос
+            search_queries = ["эндуро", "кросс", "мотоцикл эндуро", "кросс байк"]
+            query = random.choice(search_queries)
+            
+            print(f"    🔎 Поиск: '{query}'...", end=" ", flush=True)
+            
+            search_input = page.locator('input[data-marker="search-form/suggest"]').first
+            if await search_input.is_visible(timeout=3000):
+                await search_input.click()
+                await asyncio.sleep(random.uniform(0.3, 0.8))
+                
+                try:
+                    await search_input.fill("")
+                except Exception:
+                    pass
+                
+                await human.type(page, 'input[data-marker="search-form/suggest"]', query, typos=True)
+                await asyncio.sleep(random.uniform(0.5, 1.5))
+                
+                submit_btn = page.locator('button[data-marker="search-form/submit"]').first
+                if await submit_btn.is_visible(timeout=2000):
+                    await submit_btn.click()
+                    print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
+                    
+                    try:
+                        await asyncio.wait_for(
+                            page.wait_for_load_state("networkidle", timeout=25000),
+                            timeout=30.0
+                        )
+                    except Exception:
+                        await asyncio.sleep(3.0)
+                else:
+                    return False
+            else:
+                return False
+            
+            # Просмотр 20-30 сек
+            await human.browse_page(page, duration_seconds=random.uniform(20, 30))
+            await asyncio.sleep(random.uniform(1.5, 3.0))
+            
+            # Deep view 2-3 карточек
+            deep_views_target = random.randint(2, 3)
+            print(f"    🔎 Deep view {deep_views_target} карточек...")
+            for idx in range(deep_views_target):
+                success = await human.deep_view_card(page, selector_index=idx, duration_seconds=random.uniform(45, 75))
+                if success:
+                    self.deep_views_count += 1
+                await asyncio.sleep(random.uniform(1.5, 3.0))
+            
+            return True
+            
+        except Exception as e:
+            self.logger.warning(account_id, f"Phase 4 error: {e}")
+            return False
+
+    async def _phase_5_parts(
+        self,
+        page: Page,
+        account_id: str,
+        navigator: AvitoNavigator,
+        fp: Optional[Fingerprint] = None,
+        browser_launcher = None,
+    ) -> bool:
+        """
+        ФАЗА 5: Запчасти и аксессуары мото
+        - Переход в "Запчасти и аксессуары"
+        - Листание 2-3 раза
+        - Deep view 2 карточек
+        - Добавление в избранное 30-50%
+        """
+        human = HumanBehavior(fp, self.logger)
+        
+        try:
+            print("    🔍 Категория 'Запчасти и аксессуары'...", end=" ", flush=True)
+            
+            url = "https://www.avito.ru/moskva/zapchasti_i_aksessuary"
+            try:
+                await asyncio.wait_for(
+                    page.goto(url, wait_until="networkidle", timeout=25000),
+                    timeout=30.0
+                )
+                print(f"{Fore.GREEN}✓{Style.RESET_ALL}")
+            except asyncio.TimeoutError:
+                print(f"{Fore.YELLOW}⏱️{Style.RESET_ALL}")
+            
+            # Просмотр 20-30 сек
+            await human.browse_page(page, duration_seconds=random.uniform(20, 30))
+            await asyncio.sleep(random.uniform(1.5, 3.0))
+            
+            # Листание 2-3 раза
+            scrolls = random.randint(2, 3)
+            print(f"    📜 Листание {scrolls} раз...")
+            for i in range(scrolls):
+                await human.scroll_page(page, max_scrolls=1)
+                await asyncio.sleep(random.uniform(2.0, 5.0))
+            
+            # Deep view + добавление в избранное для 2 карточек
+            print(f"    🔎 Deep view 2 карточек + добавление в избранное...")
+            for idx in range(2):
+                success = await human.deep_view_card(page, selector_index=idx, duration_seconds=random.uniform(40, 70))
+                if success:
+                    self.deep_views_count += 1
+                    
+                    # Добавляем в избранное 30-50%
+                    if random.random() < 0.4:
+                        try:
+                            fav_btn = page.locator('[data-marker="favorite-button"]').first
+                            if await fav_btn.is_visible(timeout=2000):
+                                await asyncio.sleep(random.uniform(0.8, 2.0))
+                                await fav_btn.click()
+                                print(f"      ⭐ Добавлено в избранное")
+                                await asyncio.sleep(random.uniform(0.5, 1.5))
+                        except Exception:
+                            pass
+                
+                await asyncio.sleep(random.uniform(1.5, 3.0))
+            
+            return True
+            
+        except Exception as e:
+            self.logger.warning(account_id, f"Phase 5 error: {e}")
+            return False
 
 
 class AliveMode:
-    """Alive Mode - фоновая активность"""
+    """Alive Mode - фоновая активность как реальный человек"""
 
-    def __init__(self, logger):
+    def __init__(self, logger, executor=None, notifier=None):
         self.logger = logger
+        self.executor = executor
+        self.notifier = notifier
         self.running = False
         self.iteration_count = 0
 
@@ -369,14 +518,25 @@ class AliveMode:
         navigator: AvitoNavigator,
         night_mode: NightMode,
         fp: Optional[Fingerprint] = None,
+        browser_launcher = None,
     ):
-        """Запустить Alive Mode - фоновая активность на бесконечность"""
+        """
+        Запустить Alive Mode
+        
+        Поведение как у живого человека:
+        - Просмотр разных категорий
+        - Deep views карточек
+        - Добавление в избранное
+        - Поиск
+        - Случайные паузы (10-60 минут)
+        """
         self.running = True
-        human = HumanBehavior(fp)
+        human = HumanBehavior(fp, self.logger)
 
-        print(f"\n{Fore.GREEN}{'=' * 70}{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}{'✅ ALIVE MODE ЗАПУЩЕН':^70}{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}{'=' * 70}{Style.RESET_ALL}\n")
+        print(f"\n{Fore.GREEN}{'=' * 90}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}{'✅ ALIVE MODE — БОТ АКТИВЕН 24/7':^90}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}{'Просмотр карточек, добавление в избранное, поиск' :^90}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}{'=' * 90}{Style.RESET_ALL}\n")
 
         self.logger.system(f"{account_id}: Alive Mode started")
 
@@ -384,73 +544,142 @@ class AliveMode:
             while self.running:
                 # Проверяем ночной режим
                 if not night_mode.can_work(account_id):
-                    print(f"  {Fore.BLUE}🌙 Ночной режим - ожидание...{Style.RESET_ALL}")
+                    print(f"  {Fore.BLUE}🌙 Ночной режим — браузер закроется на 8+ часов{Style.RESET_ALL}")
                     await asyncio.sleep(300)
                     continue
 
-                # Выбираем случайное действие
-                action = random.choice([
-                    "browse",
-                    "search",
-                    "scroll",
-                    "images",
-                    "random",
-                    "wait",
-                ])
+                # Случайное действие
+                action = random.choices(
+                    ["deep_view_moto", "deep_view_other", "search", "browse", "favorites", "wait"],
+                    weights=[0.35, 0.20, 0.15, 0.15, 0.10, 0.05],
+                    k=1
+                )[0]
 
                 try:
-                    if action == "browse":
-                        print(f"  {Fore.CYAN}[Alive] Просмотр главной...{Style.RESET_ALL}")
+                    if action == "deep_view_moto":
+                        print(f"  {Fore.CYAN}[Alive #{self.iteration_count}] Deep view мототехники...{Style.RESET_ALL}")
                         try:
                             await asyncio.wait_for(
-                                page.goto(AvitoUrls.BASE, wait_until="networkidle", timeout=15000),
-                                timeout=20.0
+                                page.goto("https://www.avito.ru/moskva/mototsikly_i_mototehnika", wait_until="networkidle", timeout=25000),
+                                timeout=30.0
                             )
                         except Exception:
                             pass
-                        await human.browse_page(page, duration_seconds=random.uniform(15, 40))
+                        
+                        # Deep view 1-2 карточек
+                        for idx in range(random.randint(1, 2)):
+                            try:
+                                await asyncio.wait_for(
+                                    human.deep_view_card(page, selector_index=idx, duration_seconds=random.uniform(45, 90)),
+                                    timeout=120.0
+                                )
+                                
+                                # Может добавить в избранное
+                                if random.random() < 0.3:
+                                    try:
+                                        fav = page.locator('[data-marker="favorite-button"]').first
+                                        if await fav.is_visible(timeout=2000):
+                                            await fav.click()
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                            
+                            await asyncio.sleep(random.uniform(2.0, 5.0))
+
+                    elif action == "deep_view_other":
+                        categories = [
+                            ("https://www.avito.ru/moskva/avtomobili", "Авто"),
+                            ("https://www.avito.ru/moskva/kollektsii", "Коллекции"),
+                        ]
+                        url, cat_name = random.choice(categories)
+                        
+                        print(f"  {Fore.CYAN}[Alive #{self.iteration_count}] Deep view {cat_name}...{Style.RESET_ALL}")
+                        try:
+                            await asyncio.wait_for(
+                                page.goto(url, wait_until="networkidle", timeout=25000),
+                                timeout=30.0
+                            )
+                        except Exception:
+                            pass
+                        
+                        for idx in range(random.randint(1, 2)):
+                            try:
+                                await asyncio.wait_for(
+                                    human.deep_view_card(page, selector_index=idx, duration_seconds=random.uniform(40, 75)),
+                                    timeout=120.0
+                                )
+                            except Exception:
+                                pass
+                            await asyncio.sleep(random.uniform(2.0, 5.0))
 
                     elif action == "search":
-                        print(f"  {Fore.CYAN}[Alive] Поиск...{Style.RESET_ALL}")
-                        query = random.choice(["кв", "авто", "велосипед", "ноутбук"])
+                        print(f"  {Fore.CYAN}[Alive #{self.iteration_count}] Поиск...{Style.RESET_ALL}")
+                        query = random.choice(["питбайк", "мотоцикл", "квадроцикл", "эндуро", "авто", "ноутбук"])
+                        
                         try:
                             await asyncio.wait_for(
-                                human.fill_search(page, query),
-                                timeout=15.0
+                                page.goto("https://www.avito.ru/moskva/mototsikly_i_mototehnika", wait_until="networkidle", timeout=25000),
+                                timeout=30.0
                             )
+                            await asyncio.sleep(1.0)
+                            
+                            search = page.locator('input[data-marker="search-form/suggest"]').first
+                            if await search.is_visible(timeout=2000):
+                                await search.click()
+                                await asyncio.sleep(0.5)
+                                await search.fill("")
+                                await human.type(page, 'input[data-marker="search-form/suggest"]', query, typos=True)
+                                await asyncio.sleep(1.0)
+                                
+                                submit = page.locator('button[data-marker="search-form/submit"]').first
+                                if await submit.is_visible(timeout=2000):
+                                    await submit.click()
+                                    try:
+                                        await asyncio.wait_for(
+                                            page.wait_for_load_state("networkidle", timeout=25000),
+                                            timeout=30.0
+                                        )
+                                    except Exception:
+                                        await asyncio.sleep(3.0)
                         except Exception:
                             pass
 
-                    elif action == "scroll":
-                        print(f"  {Fore.CYAN}[Alive] Скролл...{Style.RESET_ALL}")
-                        await human.scroll_page(page, max_scrolls=random.randint(2, 5))
-
-                    elif action == "images":
-                        print(f"  {Fore.CYAN}[Alive] Просмотр фото...{Style.RESET_ALL}")
+                    elif action == "browse":
+                        print(f"  {Fore.CYAN}[Alive #{self.iteration_count}] Просмотр...{Style.RESET_ALL}")
                         try:
                             await asyncio.wait_for(
-                                human.inspect_images(page, max_images=random.randint(2, 5)),
-                                timeout=15.0
+                                page.goto("https://www.avito.ru/moskva", wait_until="networkidle", timeout=25000),
+                                timeout=30.0
                             )
                         except Exception:
                             pass
+                        
+                        await human.browse_page(page, duration_seconds=random.uniform(30, 60))
 
-                    elif action == "random":
-                        print(f"  {Fore.CYAN}[Alive] Случайное действие...{Style.RESET_ALL}")
-                        await human.random_human_action(page)
+                    elif action == "favorites":
+                        print(f"  {Fore.CYAN}[Alive #{self.iteration_count}] Просмотр избранного...{Style.RESET_ALL}")
+                        try:
+                            await asyncio.wait_for(
+                                page.goto("https://www.avito.ru/moskva/mototsikly_i_mototehnika", wait_until="networkidle", timeout=25000),
+                                timeout=30.0
+                            )
+                            await human.browse_page(page, duration_seconds=random.uniform(20, 40))
+                        except Exception:
+                            pass
 
                     elif action == "wait":
-                        print(f"  {Fore.CYAN}[Alive] Отдых...{Style.RESET_ALL}")
-                        await asyncio.sleep(random.uniform(2.0, 5.0))
+                        print(f"  {Fore.CYAN}[Alive #{self.iteration_count}] Отдых...{Style.RESET_ALL}")
+                        await asyncio.sleep(random.uniform(5.0, 15.0))
 
                 except asyncio.TimeoutError:
                     print(f"  {Fore.YELLOW}[Alive] Timeout{Style.RESET_ALL}")
                 except Exception as e:
                     print(f"  {Fore.YELLOW}[Alive] Error: {str(e)[:50]}{Style.RESET_ALL}")
 
-                # Большая пауза перед следующим действием (10-40 минут)
+                # Большая пауза перед следующим действием
                 self.iteration_count += 1
-                pause = random.uniform(600, 2400)
+                pause = random.uniform(600, 3600)  # 10-60 минут
                 print(f"  {Fore.CYAN}[Alive] Пауза {pause/60:.1f} мин (итерация #{self.iteration_count})...{Style.RESET_ALL}")
                 
                 try:
